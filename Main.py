@@ -14,13 +14,9 @@ import io
 from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox, QPlainTextEdit, QTabWidget
 from PyQt6.QtGui import QTextCursor, QColor
 from PyQt6.QtCore import Qt, QTimer, QObject, pyqtSignal, QThread, pyqtSlot
-# Импортируем сгенерированный класс. Команда: pyuic6 undulator.ui -o undulator.py
-from undulator import Ui_MainWindow
-from workers import SingleAxisWorker, FFIMeasurementWorker, SFIMeasurementWorker, FindMagneticAxisWorker, CircularMotionWorker
-import numpy as np
-import csv
-import matplotlib.pyplot as plt
-import traceback
+# Импортируем сгенерированный класс. Команда: pyuic6 undulator2.ui -o undulator2.py
+from undulator2 import Ui_MainWindow
+from workers import SingleAxisWorker
 
 
 class ACSControllerGUI(QMainWindow, Ui_MainWindow):
@@ -53,13 +49,19 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
                 "move_distance": getattr(self, f"move_by_input_{i}"),
                 "current_pos": 0.0,
                 "axis_obj": None, #!Здесь хранятся ссылки на ось как объект из модуля newACS, к которым можно применять его методы
-                "is_moving_indicator": getattr(self, f"is_moving_indicator_{i}")
+                "is_moving_indicator": getattr(self, f"is_moving_indicator_{i}"),
+                "masterslave": getattr(self, f"masterslave_{i}") #!!!!!!!!!!!!!!!!!!
             }
             for i in range(4)
         }
 
         self.connect_ui_elements()                               # Подключаем функции к элементам интерфейса
         self.selected_axes = []
+        self.axis_pairs = {}
+        self.masters = {1: "", 2: ""}
+        self.slaves = {1: "", 2: ""}
+        self.pair_1 = {"master": "", "slave": ""}
+        self.pair_2 = {"master": "", "slave": ""}
 
 
     def connect_ui_elements(self):                               # Кнопки общего действия: старт, стоп, ресет
@@ -68,6 +70,7 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
         self.zeropos_button.clicked.connect(self.zeropos_axes)
         self.start_choosen_axis_button.clicked.connect(self.startM)
         self.stop_button.clicked.connect(self.stop_all_axes)
+        self.tab1.currentChanged.connect(self.currentTab)
         
 
         for i in range(4):
@@ -82,6 +85,7 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
             data["enable_axis_button"].clicked.connect(lambda checked, ax=i: self.toggle_axis(ax))
             data["start_axis_button"].clicked.connect(lambda checked, ax=i: self.start(ax))
             data["choose_axis_button"].stateChanged.connect(lambda state, ax=i: self.update_selected_axes(ax, state))
+            data["masterslave"].currentTextChanged.connect(lambda text, ax=i: self.update_masterslave_pairs(ax, text))
 
     def set_default_values(self): # Выставляет дефолтные параметры движения осей в общем окне
         for i in range(4):
@@ -91,7 +95,6 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
             axis["deceleration_input"].setText("100")
             axis["kill_deceleration_input"].setText("166.67")
             axis["jerk_input"].setText("133.33")
-    
 
     def zeropos_axes(self):
         self.axes_data[0]["axis_obj"].set_pos(0)
@@ -143,6 +146,71 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
                 self.selected_axes.remove(axis)
                 print('Удалили из списка')
         print(f'Список выбранных осей: {self.selected_axes}')
+
+    def update_masterslave_pairs(self, axis, role):
+        """Обновляет пары masterslave."""
+        # if not self.stand:
+        #     self.show_error("Контроллер не подключён!")
+        #     return
+
+        for pair_num in range(1, 3):
+            if self.masters[pair_num] == axis:
+                self.masters[pair_num] = ""
+            if self.slaves[pair_num] == axis:
+                self.slaves[pair_num] = ""
+
+        if role.startswith("Master pair"):
+            pair_num = int(role[-1])
+            self.masters[pair_num] = axis
+
+        elif role.startswith("Slave pair"):
+            pair_num = int(role[-1])
+            self.slaves[pair_num] = axis
+
+        self.axis_pairs = {
+            pair_num: (self.masters[pair_num], self.slaves[pair_num])
+            for pair_num in self.masters
+            if self.masters[pair_num] != "" and self.slaves[pair_num] != ""
+        }
+
+        print(f"Обновлены пары: {self.axis_pairs}")  # Отладочный вывод
+        self.axes_pairs.setText(f"Текущие пары: {self.axis_pairs}")
+
+                        #???? ВОЗМОЖНО ЗАПОЛНИТЬ СЛОВАРИ С ПАРАМИ
+        
+        # # Удаление всех старых связей (гарантированно для всех осей)
+        # try:
+        #     delete_program = f"""
+        #         MFLAGS({0}).#DEFCON = 1
+        #         MFLAGS({1}).#DEFCON = 1
+        #         MFLAGS({2}).#DEFCON = 1
+        #         MFLAGS({3}).#DEFCON = 1
+        #         """
+        #     acsc.cleanBuffer(self.stand.hc, 3)
+        #     acsc.loadBuffer(self.stand.hc, 3, delete_program)
+        #     acsc.compileBuffer(self.stand.hc, 3)
+        #     acsc.runBuffer(self.stand.hc, 3)
+        #     print(f"Удалена зависимость для осей")
+        # except Exception as e:
+        #     print(f"Не удалось очистить зависимости: {e}")
+
+        # for pair in self.axis_pairs:
+        #     master, slave = self.axis_pairs[pair]
+        #     try:
+        #         program = f"""
+        #             MFLAGS({slave}).#DEFCON = 0
+        #             CONNECT RPOS({slave}) = APOS({master})
+        #             DEPENDS {slave}, {master}
+        #         """
+        #         acsc.cleanBuffer(self.stand.hc, 1)
+        #         acsc.loadBuffer(self.stand.hc, 1, program)
+        #         acsc.compileBuffer(self.stand.hc, 1)
+        #         acsc.runBuffer(self.stand.hc, 1)
+
+        #         print(f"Установлена связь: ось slave {slave} ← ось master {master}")
+        #     except Exception as e:
+        #         self.show_error(f"Ошибка при установке связи между master {master} и slave {slave}: {e}")
+
 
     def set_speed(self, axis, text):
         if not self.stand:
@@ -250,7 +318,7 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
             self.show_error("Контроллер не подключён!")
             return
         
-        self.print(f"Открытая вкладка: {self.tab1.tabText(self.tab1.currentIndex())}")
+        print(f"Открытая вкладка: {self.tab1.tabText(self.tab1.currentIndex())}")
         data = self.axes_data
         move_distances = []
         self.startpointM = data[self.selected_axes[0]]['axis_obj'].get_pos()
@@ -281,7 +349,6 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
 
         try:
             acsc.killAll(self.stand.hc, acsc.SYNCHRONOUS)
-            self.stop_position_updates()
         except Exception as e:
             self.show_error(f"Ошибка при остановке осей: {e}")
 
@@ -289,6 +356,10 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
         """Показывает сообщение об ошибке."""
         QMessageBox.critical(self, "Ошибка", message)
 
+    def currentTab(self):
+        self.currentTab = self.tab1.currentIndex()
+        self.currentTabName = self.tab1.tabText(self.currentTab)
+        print(f'Вкладка переключена на "{self.currentTabName}"')
 
     def start_position_updates(self):
         """Запуск отдельного потока для каждой выбранной оси"""
@@ -321,8 +392,6 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
         """Обновление данных оси в GUI (выполняется в главном потоке)"""
         axis_data = self.axes_data[axis_id]
 
-        #! Тут остановился!!!
-
         if self.currentTabName == "tab1":  # Замените на актуальное название вкладки
             # Обновляем значения
             axis_data["pos_label"].setText(f"Позиция: {pos:.4f}")
@@ -349,7 +418,6 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
         """Остановка потоков при закрытии окна"""
         self.stop_position_updates()
         super().closeEvent(event)
-
 
 if __name__ == '__main__':
     app = QApplication([])
