@@ -70,7 +70,6 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
         self.zeropos_button.clicked.connect(self.zeropos_axes)
         self.start_choosen_axis_button.clicked.connect(self.startM)
         self.stop_button.clicked.connect(self.stop_all_axes)
-        self.tab1.currentChanged.connect(self.currentTab)
         
 
         for i in range(4):
@@ -90,11 +89,11 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
     def set_default_values(self): # Выставляет дефолтные параметры движения осей в общем окне
         for i in range(4):
             axis = self.axes_data[i]
-            axis["speed_input"].setText("0.2")
-            axis["acceleration_input"].setText("100")
-            axis["deceleration_input"].setText("100")
-            axis["kill_deceleration_input"].setText("166.67")
-            axis["jerk_input"].setText("133.33")
+            axis["speed_input"].setText("100")
+            axis["acceleration_input"].setText("1000")
+            axis["deceleration_input"].setText("1000")
+            axis["kill_deceleration_input"].setText("1660")
+            axis["jerk_input"].setText("1330")
 
     def zeropos_axes(self):
         self.axes_data[0]["axis_obj"].set_pos(0)
@@ -178,38 +177,38 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
 
                         #???? ВОЗМОЖНО ЗАПОЛНИТЬ СЛОВАРИ С ПАРАМИ
         
-        # # Удаление всех старых связей (гарантированно для всех осей)
-        # try:
-        #     delete_program = f"""
-        #         MFLAGS({0}).#DEFCON = 1
-        #         MFLAGS({1}).#DEFCON = 1
-        #         MFLAGS({2}).#DEFCON = 1
-        #         MFLAGS({3}).#DEFCON = 1
-        #         """
-        #     acsc.cleanBuffer(self.stand.hc, 3)
-        #     acsc.loadBuffer(self.stand.hc, 3, delete_program)
-        #     acsc.compileBuffer(self.stand.hc, 3)
-        #     acsc.runBuffer(self.stand.hc, 3)
-        #     print(f"Удалена зависимость для осей")
-        # except Exception as e:
-        #     print(f"Не удалось очистить зависимости: {e}")
+        # Удаление всех старых связей (гарантированно для всех осей)
+        try:
+            delete_program = f"""
+                MFLAGS({0}).#DEFCON = 1
+                MFLAGS({1}).#DEFCON = 1
+                MFLAGS({2}).#DEFCON = 1
+                MFLAGS({3}).#DEFCON = 1
+                """
+            acsc.cleanBuffer(self.stand.hc, 3)
+            acsc.loadBuffer(self.stand.hc, 3, delete_program)
+            acsc.compileBuffer(self.stand.hc, 3)
+            acsc.runBuffer(self.stand.hc, 3)
+            print(f"Удалена зависимость для осей")
+        except Exception as e:
+            print(f"Не удалось очистить зависимости: {e}")
 
-        # for pair in self.axis_pairs:
-        #     master, slave = self.axis_pairs[pair]
-        #     try:
-        #         program = f"""
-        #             MFLAGS({slave}).#DEFCON = 0
-        #             CONNECT RPOS({slave}) = APOS({master})
-        #             DEPENDS {slave}, {master}
-        #         """
-        #         acsc.cleanBuffer(self.stand.hc, 1)
-        #         acsc.loadBuffer(self.stand.hc, 1, program)
-        #         acsc.compileBuffer(self.stand.hc, 1)
-        #         acsc.runBuffer(self.stand.hc, 1)
+        for pair in self.axis_pairs:
+            master, slave = self.axis_pairs[pair]
+            try:
+                program = f"""
+                    MFLAGS({slave}).#DEFCON = 0
+                    CONNECT RPOS({slave}) = APOS({master})
+                    DEPENDS {slave}, {master}
+                """
+                acsc.cleanBuffer(self.stand.hc, 1)
+                acsc.loadBuffer(self.stand.hc, 1, program)
+                acsc.compileBuffer(self.stand.hc, 1)
+                acsc.runBuffer(self.stand.hc, 1)
 
-        #         print(f"Установлена связь: ось slave {slave} ← ось master {master}")
-        #     except Exception as e:
-        #         self.show_error(f"Ошибка при установке связи между master {master} и slave {slave}: {e}")
+                print(f"Установлена связь: ось slave {slave} ← ось master {master}")
+            except Exception as e:
+                self.show_error(f"Ошибка при установке связи между master {master} и slave {slave}: {e}")
 
 
     def set_speed(self, axis, text):
@@ -281,7 +280,10 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
         if not self.stand:
             # self.show_error("Контроллер не подключён!")
             return
-
+        
+        if text == "" or text == "-":
+            return  # Пропускаем проверку, пока ввод не заверен
+    
         data = self.axes_data[axis]
         try:
             distance = float(text)
@@ -301,12 +303,12 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
         }
 
         data = self.axes_data[axis]
-        if data['state'] and axis in self.selected_axes:
+        if data['state']:
             try:
                 '''Здесь amf_relative - это флаг, который указывает, что перемещение будет относительным.'''
                 acsc.toPoint(self.stand.hc, acsc.AMF_RELATIVE, axis, data['move_distance'], acsc.SYNCHRONOUS)
                 data["is_in_pos_indicator"].setStyleSheet("background-color:rgb(255, 0, 0)")
-                self.start_position_updates()
+                self.start_position_updates(axis)
             except Exception as e:
                 self.show_error(f"Ошибка при запуске движения оси {axis}: {e}")
         else:
@@ -356,34 +358,34 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
         """Показывает сообщение об ошибке."""
         QMessageBox.critical(self, "Ошибка", message)
 
-    def currentTab(self):
-        self.currentTab = self.tab1.currentIndex()
-        self.currentTabName = self.tab1.tabText(self.currentTab)
-        print(f'Вкладка переключена на "{self.currentTabName}"')
-
-    def start_position_updates(self):
+    def start_position_updates(self, axis=None):
         """Запуск отдельного потока для каждой выбранной оси"""
         if not self.stand:
             self.show_error("Контроллер не подключён!")
             return
-
-        for axis_id in self.selected_axes:
+        
+        for axis_id in range(4):
             # Останавливаем предыдущий поток оси, если был
-            if axis_id in self.axis_workers:
-                self.axis_workers[axis_id].stop()
 
-            # Создаём и настраиваем новый поток
-            worker = SingleAxisWorker(self.stand, axis_id)
-            worker.update_signal.connect(self.handle_axis_update)
-            '''"Когда worker излучит update_signal, вызови мой метод handle_axis_update и передай ему данные из сигнала"'''
-            worker.error_signal.connect(self.handle_axis_error)
-            worker.start()
-            
-            self.axis_workers[axis_id] = worker
+            if axis_id in self.selected_axes or axis_id == axis or any(
+                axis_id in (master, slave) 
+                for master, slave in self.axis_pairs.values()
+            ):
+                if axis_id in self.axis_workers:
+                    self.axis_workers[axis_id].stop()
+                
+                # Создаём и настраиваем новый поток
+                worker = SingleAxisWorker(self.stand, axis_id)
+                worker.update_signal.connect(self.handle_axis_update)
+                '''"Когда worker излучит update_signal, вызови мой метод handle_axis_update и передай ему данные из сигнала"'''
+                worker.error_signal.connect(self.handle_axis_error)
+                worker.start()
+                
+                self.axis_workers[axis_id] = worker
 
     def stop_position_updates(self):
         """Остановка всех потоков осей"""
-        for worker in self.axis_workers.items():
+        for axis_id, worker in self.axis_workers.items():
             worker.stop()
         self.axis_workers.clear()
 
@@ -392,20 +394,17 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
         """Обновление данных оси в GUI (выполняется в главном потоке)"""
         axis_data = self.axes_data[axis_id]
 
-        if self.currentTabName == "tab1":  # Замените на актуальное название вкладки
-            # Обновляем значения
-            axis_data["pos_label"].setText(f"Позиция: {pos:.4f}")
-            axis_data["is_moving_label"].setText(f"Движение: {'Да' if moving else 'Нет'}")
-            axis_data["is_in_pos_label"].setText(f"На месте: {'Да' if in_pos else 'Нет'}")
+        # Обновляем значения
+        axis_data["pos_label"].setText(f"Позиция: {pos:.4f}")
+        axis_data["is_moving_label"].setText(f"Движение: {'Да' if moving else 'Нет'}")
+        axis_data["is_in_pos_label"].setText(f"На месте: {'Да' if in_pos else 'Нет'}")
 
-            # Меняем цвет индикаторов
-            moving_color = "rgb(0, 128, 0)" if moving else "rgb(255, 0, 0)"  # Красный/Зелёный
-            in_pos_color = "rgb(0, 128, 0)" if in_pos else "rgb(255, 0, 0)"
-            
-            axis_data["is_moving_indicator"].setStyleSheet(f"background-color: {moving_color}")
-            axis_data["is_in_pos_indicator"].setStyleSheet(f"background-color: {in_pos_color}")
-        else:
-            print('Переключите вкладку')
+        # Меняем цвет индикаторов
+        moving_color = "rgb(0, 128, 0)" if moving else "rgb(255, 0, 0)"  # Красный/Зелёный
+        in_pos_color = "rgb(0, 128, 0)" if in_pos else "rgb(255, 0, 0)"
+        
+        axis_data["is_moving_indicator"].setStyleSheet(f"background-color: {moving_color}")
+        axis_data["is_in_pos_indicator"].setStyleSheet(f"background-color: {in_pos_color}")
 
     @pyqtSlot(int, str)
     def handle_axis_error(self, axis_id, error_msg):
